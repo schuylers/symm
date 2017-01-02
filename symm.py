@@ -1,4 +1,7 @@
+from __future__ import division
+
 import re
+import numpy as np
 
 class ParseError(Exception):
     pass
@@ -18,7 +21,7 @@ class Symbol(object):
         else:
             return None, string
 
-    def __str__(self):
+    def __str__(self, infix=True):
         return str(self.token)
 
     __repr__ = __str__
@@ -68,7 +71,23 @@ class Parenthesis(Symbol):
 
 
 class Expression(object):
-    pass
+    def substitute(self, subs):
+        raise NotImplementedError
+
+    def _substitute_arg(self, arg, subs):
+        if isinstance(arg, Expression):
+            return arg.substitute(subs)
+        elif isinstance(arg, Variable) and arg.token in subs:
+            return Constant(subs[arg.token])
+        else:
+            return arg
+
+    def eval(self):
+        string = re.sub('\.([a-zA-Z]+)', lambda x: 'np' + x.group(0), str(self))
+        try:
+            return eval(string)
+        except Exception:
+            return np.nan
 
 
 class UnaryExpression(Expression):
@@ -76,8 +95,15 @@ class UnaryExpression(Expression):
         self.op = op
         self.arg1 = arg1
 
-    def __str__(self):
-        return str(self.op) + '(' + str(self.arg1) + ')'
+    def substitute(self, subs):
+        return UnaryExpression(self.op,
+                               self._substitute_arg(self.arg1, subs))
+
+    def __str__(self, infix=True):
+        if infix:
+            return str(self.op) + '(' + self.arg1.__str__(infix) + ')'
+        else:
+            return self.arg1.__str__(infix) + ' ' + str(self.op)
 
     __repr__ = __str__
 
@@ -88,8 +114,16 @@ class BinaryExpression(Expression):
         self.arg1 = arg1
         self.arg2 = arg2
 
-    def __str__(self):
-        return '(' + str(self.arg1) + str(self.op) + str(self.arg2) + ')'
+    def substitute(self, subs):
+        return BinaryExpression(self.op,
+                                self._substitute_arg(self.arg1, subs),
+                                self._substitute_arg(self.arg2, subs))
+
+    def __str__(self, infix=True):
+        if infix:
+            return '(' + self.arg1.__str__(infix) + str(self.op) + self.arg2.__str__(infix) + ')'
+        else:
+            return self.arg1.__str__(infix) + ' ' + self.arg2.__str__(infix) + ' ' + str(self.op)
 
     __repr__ = __str__
 
@@ -111,7 +145,7 @@ def _tokenize(string):
             break
     return tokens
 
-def pull_unaries(tokens):
+def _pull_unaries(tokens):
     new_tokens = [tokens[-1]]
     for i in range(len(tokens)-2, -1, -1):
         if type(tokens[i]) == Operator and (i == 0 or type(tokens[i-1]) == Operator):
@@ -121,7 +155,7 @@ def pull_unaries(tokens):
             new_tokens.insert(0, tokens[i])
     return new_tokens
 
-def pull_binaries(tokens, ops, rtl=False):
+def _pull_binaries(tokens, ops, rtl=False):
     if not rtl:
         new_tokens = [tokens[0]]
         i = 1
@@ -168,18 +202,15 @@ def _syntax(tokens):
     tokens = new_tokens
 
     # apply order of operations to build expressions
-    tokens = pull_unaries(tokens)
-    tokens = pull_binaries(tokens, [Operator('^')], rtl=True)
-    tokens = pull_binaries(tokens, [Operator('*'), Operator('/')])
-    tokens = pull_binaries(tokens, [Operator('+'), Operator('-')])
+    tokens = _pull_unaries(tokens)
+    tokens = _pull_binaries(tokens, [Operator('^')], rtl=True)
+    tokens = _pull_binaries(tokens, [Operator('*'), Operator('/')])
+    tokens = _pull_binaries(tokens, [Operator('+'), Operator('-')])
 
     if len(tokens) > 1:
         raise ParseError('Incomplete syntax tree')
 
     return tokens[0]
-
-def eval(expr):
-    pass
 
 def parse(string):
     tokens = _tokenize(string)
